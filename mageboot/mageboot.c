@@ -1,29 +1,44 @@
 #include "mageboot.h"
 
-void init(void)
+#ifdef OTA_ENABLED
+register uint8_t OTA asm("r2");
+#endif
+
+int main(void)
 {
-	CLEAR_ZEROREG;
-	SP = RAMEND;
 	uint8_t flags = MCUSR;
 	MCUSR = 0;
 	setWDT(WATCHDOG_OFF);
 	if (flags & RESET_FLAGS) START_PROGRAM;
-}
-
-int main(void)
-{	
+	
 	SETUP_UART;
+	setWDT(WATCHDOG_500MS);
+	
+	#ifdef OTA_ENABLED
+	if(OTA)
+	{
+		SETUP_UART_OTA;
+		setWDT(WATCHDOG_2S);
+	}
+	#endif
+	
 	register uint8_t cmd;
 	register address_t address = 0;
 	register length_t length;
-	
-	setWDT(WATCHDOG_500MS);
 
 	while(1)
 	{
 		cmd = read();
 		switch(cmd)
 		{
+			case SIGNATURE:
+			{
+				validate();
+				write(SIGNATURE_0);
+				write(SIGNATURE_1);
+				write(SIGNATURE_2);
+			}
+			break;
 			case ADDRESS:
 			{
 				GETADDRESS(address);
@@ -53,16 +68,31 @@ int main(void)
 			break;
 			default:
 			{
-				write(FAIL);
+				#ifdef OTA_ENABLED
+				if(OTA == 0)
+				#endif
+					write(FAIL);
 			}
 			break;
 		}
-		write(OK);
+		#ifdef OTA_ENABLED
+		if(OTA == 0)
+		#endif
+			write(OK);
 	}
 }
 
 uint8_t read(void)
 {
+	#ifdef OTA_ENABLED
+	if(OTA)
+	{
+		while(WAITING_FOR_RX_OTA);
+		if(NO_ERROR_OTA) RESET_WATCHDOG;
+		return UART_DATA_OTA;
+	}
+	#endif
+	
 	while(WAITING_FOR_RX);
 	if(NO_ERROR) RESET_WATCHDOG;
 	return UART_DATA;
@@ -70,6 +100,15 @@ uint8_t read(void)
 
 void write(uint8_t data)
 {
+	#ifdef OTA_ENABLED
+	if(OTA)
+	{
+		while(WAITING_FOR_TX_OTA);
+		UART_DATA_OTA = data;
+		return;
+	}
+	#endif
+	
 	while(WAITING_FOR_TX);
 	UART_DATA = data;
 }
